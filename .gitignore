@@ -2,3 +2,6 @@ isaacgym*
 .ipynb_checkpoints/
 .vscode/
 *img
+*.png
+predictor/ckpts/
+*/__pycache__/

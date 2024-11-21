@@ -30,6 +30,7 @@
 
 from legged_gym import LEGGED_GYM_ROOT_DIR
 import os
+import sys
 import code
 
 import isaacgym
@@ -46,6 +47,9 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 from time import time, sleep
 from legged_gym.utils import webviewer
+sys.path.append("/home/xyli/Code/extreme-parkour/")
+from predictor.train import MLPRewardPredictor  # Import the predictor model
+import numpy as np  # Add this import if not already present
 
 def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
     if checkpoint==-1:
@@ -54,6 +58,34 @@ def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
         model = models[-1]
         checkpoint = model.split("_")[-1].split(".")[0]
     return model, checkpoint
+
+def create_recording_camera(gym, env_handle,
+        resolution= (1920, 1080),
+        h_fov= 86,
+        actor_to_attach= None,
+        transform= None, # related to actor_to_attach
+    ):
+    camera_props = gymapi.CameraProperties()
+    camera_props.enable_tensors = True
+    camera_props.width = resolution[0]
+    camera_props.height = resolution[1]
+    camera_props.horizontal_fov = h_fov
+    camera_handle = gym.create_camera_sensor(env_handle, camera_props)
+    if actor_to_attach is not None:
+        gym.attach_camera_to_body(
+            camera_handle,
+            env_handle,
+            actor_to_attach,
+            transform,
+            gymapi.FOLLOW_POSITION,
+        )
+    elif transform is not None:
+        gym.set_camera_transform(
+            camera_handle,
+            env_handle,
+            transform,
+        )
+    return camera_handle
 
 def play(args):
     if args.web:
@@ -66,11 +98,11 @@ def play(args):
     # override some parameters for testing
     if args.nodelay:
         env_cfg.domain_rand.action_delay_view = 0
-    env_cfg.env.num_envs = 16 if not args.save else 64
+    env_cfg.env.num_envs = 4 if not args.save else 64
     env_cfg.env.episode_length_s = 60
     env_cfg.commands.resampling_time = 60
-    env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 5
+    env_cfg.terrain.num_rows = 2
+    env_cfg.terrain.num_cols = 2
     env_cfg.terrain.height = [0.02, 0.02]
     env_cfg.terrain.terrain_dict = {"smooth slope": 0., 
                                     "rough slope up": 0.0,
@@ -96,6 +128,29 @@ def play(args):
     env_cfg.terrain.terrain_proportions = list(env_cfg.terrain.terrain_dict.values())
     env_cfg.terrain.curriculum = False
     env_cfg.terrain.max_difficulty = True
+
+    env_cfg.terrain.selected = True
+    # env_cfg.terrain.selected_idx = 18
+    # env_cfg.terrain.terrain_kwargs = {
+    #     "type": "parkour_step_terrain",
+    #     "num_stones": env_cfg.terrain.num_goals - 2,
+    #     "step_height": 0.45,
+    #     "x_range": [0.3,1.5],
+    #     "y_range": [-0.4, 0.4],
+    #     "half_valid_width": [0.5, 1],
+    #     "pad_height": 0,
+    # }
+    env_cfg.terrain.selected_idx = 16
+    env_cfg.terrain.terrain_kwargs = {
+        "type": "parkour_hurdle_terrain",
+        "num_stones": env_cfg.terrain.num_goals - 2,
+        "stone_len": 0.4,
+        "hurdle_height_range": [0.3, 0.5],
+        "pad_height": 0,
+        "x_range": [1.2, 2.2],
+        "y_range": env_cfg.terrain.y_range,
+        "half_valid_width": [0.4, 0.8],
+    }
     
     env_cfg.depth.angle = [0, 1]
     env_cfg.noise.add_noise = True
@@ -105,11 +160,22 @@ def play(args):
     env_cfg.domain_rand.randomize_base_mass = False
     env_cfg.domain_rand.randomize_base_com = False
 
-    depth_latent_buffer = []
+    # Load the trained predictor model
+    predictor = MLPRewardPredictor(latent_dim=32, past_steps=5, future_steps=10)
+    predictor.load_state_dict(torch.load('/home/xyli/Code/extreme-parkour/predictor/ckpts/predictor_1119_5_10.pth'))
+    predictor.eval()
+
+    # Load the statistics file
+    statistics = np.load('/home/xyli/Code/extreme-parkour/predictor/statistics.npy', allow_pickle=True).item()
+    rewards_mean = statistics['mean']
+    rewards_std = statistics['std']
+    
+    depth_latent_buffer = deque(maxlen=5)  # Buffer to store past depth latents
     # prepare environment
     env: LeggedRobot
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     obs = env.get_observations()
+    print("lookat", env.lookat_id)
 
     if args.web:
         web_viewer.setup(env)
@@ -118,6 +184,20 @@ def play(args):
     train_cfg.runner.resume = True
     ppo_runner, train_cfg, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
     
+    if RECORD_FRAMES:
+        print("RECORD FRAMES")
+        transform = gymapi.Transform()
+        transform.p = gymapi.Vec3(*env_cfg.viewer.pos)
+        transform.r = gymapi.Quat.from_euler_zyx(0., 0., -np.pi/2)
+        recording_camera = create_recording_camera(
+            env.gym,
+            env.envs[0],
+            transform= transform,
+        )
+        if not os.path.exists(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images")):
+            os.makedirs(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images"))
+        print("RECORD FRAMES11")
+
     if args.use_jit:
         path = os.path.join(log_pth, "traced")
         model, checkpoint = get_load_path(root=path, checkpoint=args.checkpoint)
@@ -133,6 +213,7 @@ def play(args):
     actions = torch.zeros(env.num_envs, 12, device=env.device, requires_grad=False)
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
+    predicted_reward = 0.
 
     for i in range(10*int(env.max_episode_length)):
         if args.use_jit:
@@ -154,6 +235,17 @@ def play(args):
                     depth_latent_and_yaw = depth_encoder(infos["depth"], obs_student)
                     depth_latent = depth_latent_and_yaw[:, :-2]
                     yaw = depth_latent_and_yaw[:, -2:]
+                    depth_latent_buffer.append(depth_latent.detach().cpu().numpy())
+                
+                    if len(depth_latent_buffer) == 5:
+                        past_latents = np.stack(depth_latent_buffer, axis=1)  # Shape: (num_envs, past_steps, 32)
+                        past_latents = torch.tensor(past_latents, dtype=torch.float32)
+                        past_latents = past_latents.unsqueeze(0)  # Add batch dimension
+                        with torch.no_grad():
+                            predicted_rewards = predictor(past_latents).cpu().numpy()  # Convert tensor to numpy array
+                            predicted_rewards = predicted_rewards.squeeze(0)  # Remove batch dimension
+                        predicted_reward = predicted_rewards[env.lookat_id][8]
+                        predicted_reward = predicted_reward * rewards_std + rewards_mean
                 obs[:, 6:8] = 1.5*yaw
                     
             else:
@@ -165,6 +257,41 @@ def play(args):
                 actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
             
         obs, _, rews, dones, infos = env.step(actions.detach())
+
+        # Display rewards and predicted rewards using OpenCV
+        frame = np.zeros((200, 800, 3), dtype=np.uint8)
+        rewards_np = rews[env.lookat_id].cpu().numpy()  # Convert tensor to numpy array
+        cv2.putText(frame, f"Rewards: {np.round(rewards_np, 2)}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"Predicted Rewards: {np.round(predicted_reward, 2)}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.imshow('Rewards and Predicted Rewards', frame)
+        cv2.waitKey(1)
+
+        if RECORD_REW:
+            # Normalize depth values to the range 0-255
+            depth_image = env.depth_buffer[env.lookat_id, -1].cpu().numpy()
+            depth_image = (depth_image - depth_image.min()) / (depth_image.max() - depth_image.min()) * 255
+            depth_image = depth_image.astype(np.uint8)
+            depth_image = cv2.cvtColor(depth_image, cv2.COLOR_GRAY2BGR)
+            depth_image = cv2.resize(depth_image, (depth_image.shape[1] * 4, depth_image.shape[0] * 4))  # Resize the image to make it larger
+            text = f"Rewards: {rewards_np:.2f} | step: {i}"
+            text_size = 0.5
+            text_thickness = 1
+            text_color = (0, 0, 255)  # Red color in BGR format
+            text_position = (10, depth_image.shape[0] - 10)
+            cv2.putText(depth_image, text, text_position, cv2.FONT_HERSHEY_SIMPLEX, text_size, text_color, text_thickness, cv2.LINE_AA)
+            
+            depth_filename = os.path.join(os.path.abspath("../../logs/images/"), f"depth_{i:04d}.png")
+            cv2.imwrite(depth_filename, depth_image)
+
+        if RECORD_FRAMES:
+            print("RECORD FRAMES")
+            filename = os.path.join(
+                os.path.abspath("../../logs/images/"),
+                f"{i:04d}.png",
+            )
+            env.gym.write_viewer_image_to_file(env.viewer, filename)
+            print("RECORD FRAMES222")
+
         if args.web:
             web_viewer.render(fetch_results=True,
                         step_graphics=True,
@@ -180,6 +307,46 @@ def play(args):
 if __name__ == '__main__':
     EXPORT_POLICY = False
     RECORD_FRAMES = False
+    RECORD_REW = True
     MOVE_CAMERA = False
     args = get_args()
-    play(args)
+    try:
+        play(args)
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt")
+    finally:
+        if RECORD_FRAMES:
+            import subprocess
+            print("converting frames to video")
+            log_dir = "../../logs/{}/".format(args.proj_name) + args.exptid
+            subprocess.run(["ffmpeg",
+                "-framerate", "50",
+                "-r", "50",
+                "-i", "../../logs/images/%04d.png",
+                "-c:v", "libx264",
+                "-hide_banner", "-loglevel", "error",
+                os.path.join(log_dir, f"video_4.mp4")
+            ])
+            print("done converting frames to video, deleting frame images")
+            for f in os.listdir(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images")):
+                os.remove(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images", f))
+            print("done deleting frame images")
+        if RECORD_REW:
+            import subprocess
+            print("converting depth images to video")
+            log_dir = "../../logs/{}/".format(args.proj_name) + args.exptid
+            # Convert depth images to video
+            subprocess.run(["ffmpeg",
+                "-framerate", "50",
+                "-r", "50",
+                "-i", "../../logs/images/depth_%04d.png",
+                "-c:v", "libx264",
+                "-hide_banner", "-loglevel", "error",
+                os.path.join(log_dir, f"depth_video.mp4")
+            ])
+            print("done converting depth images to video, deleting depth images")
+            # for f in os.listdir(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images")):
+            #     if f.startswith("depth_"):
+            #         os.remove(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images", f))
+            # print("done deleting depth images")
+    # play(args)

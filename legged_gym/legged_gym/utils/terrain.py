@@ -123,7 +123,9 @@ class Terrain:
                     if max_difficulty:
                         terrain = self.make_terrain(choice, np.random.uniform(0.7, 1))
                     else:
-                        terrain = self.make_terrain(choice, np.random.uniform(0, 1))
+                        # terrain = self.make_terrain(choice, np.random.uniform(0, 1))
+                        terrain = self.make_terrain(choice, np.random.uniform(0.5, 1.5))
+                        # terrain = self.make_terrain(choice, np.random.uniform(1.5, 2.5))
                 else:
                     terrain = self.make_terrain(choice, difficulty)
 
@@ -136,12 +138,14 @@ class Terrain:
             (i, j) = np.unravel_index(k, (self.cfg.num_rows, self.cfg.num_cols))
 
             terrain = terrain_utils.SubTerrain("terrain",
-                              width=self.width_per_env_pixels,
-                              length=self.length_per_env_pixels,
-                              vertical_scale=self.vertical_scale,
-                              horizontal_scale=self.horizontal_scale)
+                              width=self.length_per_env_pixels,
+                              length=self.width_per_env_pixels,
+                              vertical_scale=self.cfg.vertical_scale,
+                              horizontal_scale=self.cfg.horizontal_scale)
 
-            eval(terrain_type)(terrain, **self.cfg.terrain_kwargs.terrain_kwargs)
+            eval(terrain_type)(terrain, **self.cfg.terrain_kwargs)
+            self.add_roughness(terrain)
+            terrain.idx = self.cfg.selected_idx
             self.add_terrain_to_map(terrain, i, j)
     
     def add_roughness(self, terrain, difficulty=1):

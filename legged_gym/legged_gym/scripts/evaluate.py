@@ -38,6 +38,7 @@ from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Log
 from isaacgym import gymtorch, gymapi, gymutil
 import numpy as np
 import torch
+import h5py
 import cv2
 from collections import deque
 import statistics
@@ -72,11 +73,12 @@ def play(args):
     # override some parameters for testing
     if args.nodelay:
         env_cfg.domain_rand.action_delay_view = 0
-    env_cfg.env.num_envs = 256
+    # env_cfg.env.num_envs = 256
+    env_cfg.env.num_envs = 256 * 4
     env_cfg.env.episode_length_s = 20
     env_cfg.commands.resampling_time = 60
-    env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 5
+    env_cfg.terrain.num_rows = 10
+    env_cfg.terrain.num_cols = 10
     env_cfg.terrain.height = [0.02, 0.02]
     env_cfg.terrain.terrain_dict = {"smooth slope": 0., 
                                     "rough slope up": 0.0,
@@ -144,6 +146,11 @@ def play(args):
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
 
+    dataset_depth_latent = []
+    dataset_obs = []
+    dataset_rew = []
+    dataset_dones = []
+
     for i in tqdm(range(1500)):
 
         if env.cfg.depth.use_camera:
@@ -167,6 +174,12 @@ def play(args):
             
         cur_goal_idx = env.cur_goal_idx.clone()
         obs, _, rews, dones, infos = env.step(actions.detach())
+
+        dataset_depth_latent.append(depth_latent.detach().cpu().numpy())
+        dataset_obs.append(obs.detach().cpu().numpy())
+        dataset_rew.append(rews.detach().cpu().numpy())
+        dataset_dones.append(dones.detach().cpu().numpy())
+
         if args.web:
             web_viewer.render(fetch_results=True,
                         step_graphics=True,
@@ -214,6 +227,13 @@ def play(args):
     print("Mean number of waypoints: {:.2f}$\pm${:.2f}".format(num_waypoints_mean, num_waypoints_std))
     # print("Mean time to fall: {:.2f}$\pm${:.2f}".format(time_to_fall_mean, time_to_fall_std))
     print("Mean edge violation: {:.2f}$\pm${:.2f}".format(edge_violation_mean, edge_violation_std))
+
+    with h5py.File("../../logs/parkour_new/dis_eval_dataset_0.5_1.5.hdf5", "w") as f:
+        f.create_dataset("depth_latent", data=dataset_depth_latent)
+        f.create_dataset("obs", data=dataset_obs)
+        f.create_dataset("rew", data=dataset_rew)
+        f.create_dataset("dones", data=dataset_dones)
+        print("Saved dataset", len(dataset_rew), dataset_rew[0].shape)
 
 
 if __name__ == '__main__':

@@ -163,6 +163,7 @@ class LeggedRobotCfg(BaseConfig):
         measure_horizontal_noise = 0.0
 
         selected = False # select a unique terrain type and pass all arguments
+        selected_idx = 0 # index of selected terrain type
         terrain_kwargs = None # Dict of arguments for selected terrain
         max_init_terrain_level = 5 # starting curriculum state
         terrain_length = 18.
@@ -404,7 +405,7 @@ class LeggedRobotCfgPPO(BaseConfig):
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
         num_steps_per_env = 24 # per iteration
-        max_iterations = 50000 # number of policy updates
+        max_iterations = 10000 # number of policy updates
 
         # logging
         save_interval = 100 # check for potential saves every this many iterations
