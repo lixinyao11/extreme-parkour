@@ -97,6 +97,7 @@ def play(args):
     log_pth = "../../logs/{}/".format(args.proj_name) + args.exptid
 
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
+    _, train_cfg_safe = task_registry.get_cfgs(name=args.task_safe)
     # override some parameters for testing
     if args.nodelay:
         env_cfg.domain_rand.action_delay_view = 0
@@ -131,7 +132,7 @@ def play(args):
     env_cfg.terrain.curriculum = False
     env_cfg.terrain.max_difficulty = True
 
-    env_cfg.terrain.selected = True
+    # env_cfg.terrain.selected = True
 
     # env_cfg.terrain.selected_idx = 18
     # env_cfg.terrain.terrain_kwargs = {
@@ -144,25 +145,25 @@ def play(args):
     #     "half_valid_width": [0.5, 1],
     #     "pad_height": 0,
     # }
-    env_cfg.terrain.selected_idx = 15
-    difficulty = 0.5
-    x_range = [-0.1, 0.1+0.3*difficulty]  # offset to stone_len
-    y_range = [0.2, 0.3+0.1*difficulty]
-    stone_len = [0.9 - 0.3*difficulty, 1 - 0.2*difficulty]#2 * round((0.6) / 2.0, 1)
-    incline_height = 0.25*difficulty
-    last_incline_height = incline_height + 0.1 - 0.1*difficulty
-    env_cfg.terrain.terrain_kwargs = {
-        "type": "parkour_terrain",
-        "num_stones": env_cfg.terrain.num_goals - 2,
-        "x_range": x_range,
-        "y_range": y_range,
-        "incline_height": incline_height,
-        "stone_len": stone_len,
-        "stone_width": 1.0, 
-        "last_incline_height": last_incline_height,
-        "pad_height": 0,
-        "pit_depth": [0.2, 1]
-    }
+    # env_cfg.terrain.selected_idx = 15
+    # difficulty = 0.5
+    # x_range = [-0.1, 0.1+0.3*difficulty]  # offset to stone_len
+    # y_range = [0.2, 0.3+0.1*difficulty]
+    # stone_len = [0.9 - 0.3*difficulty, 1 - 0.2*difficulty]#2 * round((0.6) / 2.0, 1)
+    # incline_height = 0.25*difficulty
+    # last_incline_height = incline_height + 0.1 - 0.1*difficulty
+    # env_cfg.terrain.terrain_kwargs = {
+    #     "type": "parkour_terrain",
+    #     "num_stones": env_cfg.terrain.num_goals - 2,
+    #     "x_range": x_range,
+    #     "y_range": y_range,
+    #     "incline_height": incline_height,
+    #     "stone_len": stone_len,
+    #     "stone_width": 1.0, 
+    #     "last_incline_height": last_incline_height,
+    #     "pad_height": 0,
+    #     "pit_depth": [0.2, 1]
+    # }
     # env_cfg.terrain.selected_idx = 16
     # env_cfg.terrain.terrain_kwargs = {
     #     "type": "parkour_hurdle_terrain",
@@ -179,9 +180,14 @@ def play(args):
     env_cfg.noise.add_noise = True
     env_cfg.domain_rand.randomize_friction = True
     env_cfg.domain_rand.push_robots = False
+    env_cfg.domain_rand.max_push_vel_xy = 0.0
+    # env_cfg.domain_rand.randomize_dof_bias = False
+    # env_cfg.domain_rand.erfi = False
+    # env_cfg.domain_rand.randomize_timer_minus = 0.0
     env_cfg.domain_rand.push_interval_s = 6
     env_cfg.domain_rand.randomize_base_mass = False
     env_cfg.domain_rand.randomize_base_com = False
+    env_cfg.domain_rand.added_mass_range = [0, 0]
 
     # Load the trained predictor model
     past_len = 20
@@ -201,6 +207,7 @@ def play(args):
     env.lookat_id = 2
     obs = env.get_observations()
     print("lookat", env.lookat_id)
+    # env.terrain_levels[:] = 9
 
     if args.web:
         web_viewer.setup(env)
@@ -209,6 +216,11 @@ def play(args):
     train_cfg.runner.resume = True
     ppo_runner, train_cfg, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
     
+    # load safe policy
+    train_cfg_safe.runner.resume = True
+    ppo_runner_safe, train_cfg_safe = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg_safe)
+    policy_safe = ppo_runner_safe.get_inference_policy(device=env.device)
+
     if RECORD_FRAMES:
         print("RECORD FRAMES")
         transform = gymapi.Transform()
@@ -280,25 +292,28 @@ def play(args):
                 actions = ppo_runner.alg.depth_actor(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
             else:
                 actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
-            
-        obs, _, rews, dones, infos = env.step(actions.detach())
 
-        # Display rewards and predicted rewards using OpenCV
-        frame = np.zeros((200, 800, 3), dtype=np.uint8)
-        rewards_np = rews[env.lookat_id].cpu().numpy()  # Convert tensor to numpy array
-        cv2.putText(frame, f"Rewards: {rewards_np:.3f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        cv2.putText(frame, f"Predicted Rewards: {np.round(predicted_reward, 3)}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            actions_safe = policy_safe(obs.detach())
+            
+        # obs, _, rews, dones, infos = env.step(actions.detach())
+        obs, _, rews, dones, infos = env.step(actions_safe.detach())
+
+        # # Display rewards and predicted rewards using OpenCV
+        # frame = np.zeros((200, 800, 3), dtype=np.uint8)
+        # rewards_np = rews[env.lookat_id].cpu().numpy()  # Convert tensor to numpy array
+        # cv2.putText(frame, f"Rewards: {rewards_np:.3f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        # cv2.putText(frame, f"Predicted Rewards: {np.round(predicted_reward, 3)}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         
-        # Draw a circle based on the predicted reward
-        if predicted_reward < REWARD_THRESHOLD:
-            cv2.circle(frame, (400, 150), 50, (0, 0, 255), -1)  # Red circle
-        else:
-            cv2.circle(frame, (400, 150), 50, (0, 255, 0), -1)  # Green circle
+        # # Draw a circle based on the predicted reward
+        # if predicted_reward < REWARD_THRESHOLD:
+        #     cv2.circle(frame, (400, 150), 50, (0, 0, 255), -1)  # Red circle
+        # else:
+        #     cv2.circle(frame, (400, 150), 50, (0, 255, 0), -1)  # Green circle
         
-        # Display predicted reward at the top of the window
-        cv2.putText(frame, f"Predicted Reward: {np.round(predicted_reward, 3)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        cv2.imshow('Rewards and Predicted Rewards', frame)
-        cv2.waitKey(1)
+        # # Display predicted reward at the top of the window
+        # cv2.putText(frame, f"Predicted Reward: {np.round(predicted_reward, 3)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        # cv2.imshow('Rewards and Predicted Rewards', frame)
+        # cv2.waitKey(1)
 
         if RECORD_REW:
             # Normalize depth values to the range 0-255

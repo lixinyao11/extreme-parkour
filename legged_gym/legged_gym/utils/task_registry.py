@@ -145,11 +145,18 @@ class TaskRegistry():
             log_dir = log_root#os.path.join(log_root, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + train_cfg.runner.run_name)
         
         train_cfg_dict = class_to_dict(train_cfg)
-        runner = OnPolicyRunner(env, 
-                                train_cfg_dict, 
-                                log_dir, 
-                                init_wandb=init_wandb,
-                                device=args.rl_device, **kwargs)
+        runner_class = eval(train_cfg.runner_class_name)
+
+        # runner = OnPolicyRunner(env, 
+        #                         train_cfg_dict, 
+        #                         log_dir, 
+        #                         init_wandb=init_wandb,
+        #                         device=args.rl_device, **kwargs)
+        runner = runner_class(env, 
+                        train_cfg_dict, 
+                        log_dir, 
+                        # init_wandb=init_wandb,
+                        device=args.rl_device, **kwargs)
         #save resume path before creating a new log_dir
         resume = train_cfg.runner.resume
         if args.resumeid:

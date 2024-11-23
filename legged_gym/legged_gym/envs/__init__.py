@@ -56,4 +56,4 @@ task_registry.register( "go1", LeggedRobot, Go1RoughCfg(), Go1RoughCfgPPO() )
 from legged_gym.envs.a1.a1_pos_config import A1PosRoughCfgNoPenalty, A1PosRoughCfgPPOLagrangian
 from legged_gym.envs.base.legged_robot_pos import LeggedRobotPos
 ## PPO Lagrangian
-task_registry.register( "a1_pos_rough_ppo_lagrangian", LeggedRobotPos, A1PosRoughCfgNoPenalty(), A1PosRoughCfgPPOLagrangian())
+task_registry.register( "a1_pos_rough_ppo_lagrangian", LeggedRobot, A1ParkourCfg(), A1PosRoughCfgPPOLagrangian())
