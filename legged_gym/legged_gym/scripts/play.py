@@ -87,6 +87,8 @@ def create_recording_camera(gym, env_handle,
         )
     return camera_handle
 
+REWARD_THRESHOLD = 0.013  # Set the reward threshold
+
 def play(args):
     if args.web:
         web_viewer = webviewer.WebViewer()
@@ -130,27 +132,48 @@ def play(args):
     env_cfg.terrain.max_difficulty = True
 
     env_cfg.terrain.selected = True
+
     # env_cfg.terrain.selected_idx = 18
     # env_cfg.terrain.terrain_kwargs = {
     #     "type": "parkour_step_terrain",
     #     "num_stones": env_cfg.terrain.num_goals - 2,
-    #     "step_height": 0.45,
+    #     # "step_height": 0.45,
+    #     "step_height": 0.55,
     #     "x_range": [0.3,1.5],
     #     "y_range": [-0.4, 0.4],
     #     "half_valid_width": [0.5, 1],
     #     "pad_height": 0,
     # }
-    env_cfg.terrain.selected_idx = 16
+    env_cfg.terrain.selected_idx = 15
+    difficulty = 0.5
+    x_range = [-0.1, 0.1+0.3*difficulty]  # offset to stone_len
+    y_range = [0.2, 0.3+0.1*difficulty]
+    stone_len = [0.9 - 0.3*difficulty, 1 - 0.2*difficulty]#2 * round((0.6) / 2.0, 1)
+    incline_height = 0.25*difficulty
+    last_incline_height = incline_height + 0.1 - 0.1*difficulty
     env_cfg.terrain.terrain_kwargs = {
-        "type": "parkour_hurdle_terrain",
+        "type": "parkour_terrain",
         "num_stones": env_cfg.terrain.num_goals - 2,
-        "stone_len": 0.4,
-        "hurdle_height_range": [0.3, 0.5],
+        "x_range": x_range,
+        "y_range": y_range,
+        "incline_height": incline_height,
+        "stone_len": stone_len,
+        "stone_width": 1.0, 
+        "last_incline_height": last_incline_height,
         "pad_height": 0,
-        "x_range": [1.2, 2.2],
-        "y_range": env_cfg.terrain.y_range,
-        "half_valid_width": [0.4, 0.8],
+        "pit_depth": [0.2, 1]
     }
+    # env_cfg.terrain.selected_idx = 16
+    # env_cfg.terrain.terrain_kwargs = {
+    #     "type": "parkour_hurdle_terrain",
+    #     "num_stones": env_cfg.terrain.num_goals - 2,
+    #     "stone_len": 0.4,
+    #     "hurdle_height_range": [0.3, 0.6],
+    #     "pad_height": 0,
+    #     "x_range": [1.2, 2.2],
+    #     "y_range": env_cfg.terrain.y_range,
+    #     "half_valid_width": [0.4, 0.8],
+    # }
     
     env_cfg.depth.angle = [0, 1]
     env_cfg.noise.add_noise = True
@@ -161,8 +184,9 @@ def play(args):
     env_cfg.domain_rand.randomize_base_com = False
 
     # Load the trained predictor model
-    predictor = MLPRewardPredictor(latent_dim=32, past_steps=5, future_steps=10)
-    predictor.load_state_dict(torch.load('/home/xyli/Code/extreme-parkour/predictor/ckpts/predictor_1119_5_10.pth'))
+    past_len = 20
+    predictor = MLPRewardPredictor(latent_dim=32, past_steps=past_len)
+    predictor.load_state_dict(torch.load('/home/xyli/Code/extreme-parkour/predictor/ckpts/predictor_1121_20_0_100.pth'))
     predictor.eval()
 
     # Load the statistics file
@@ -170,10 +194,11 @@ def play(args):
     rewards_mean = statistics['mean']
     rewards_std = statistics['std']
     
-    depth_latent_buffer = deque(maxlen=5)  # Buffer to store past depth latents
+    depth_latent_buffer = deque(maxlen=past_len)  # Buffer to store past depth latents
     # prepare environment
     env: LeggedRobot
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
+    env.lookat_id = 2
     obs = env.get_observations()
     print("lookat", env.lookat_id)
 
@@ -237,14 +262,14 @@ def play(args):
                     yaw = depth_latent_and_yaw[:, -2:]
                     depth_latent_buffer.append(depth_latent.detach().cpu().numpy())
                 
-                    if len(depth_latent_buffer) == 5:
+                    if len(depth_latent_buffer) == past_len:
                         past_latents = np.stack(depth_latent_buffer, axis=1)  # Shape: (num_envs, past_steps, 32)
                         past_latents = torch.tensor(past_latents, dtype=torch.float32)
                         past_latents = past_latents.unsqueeze(0)  # Add batch dimension
                         with torch.no_grad():
                             predicted_rewards = predictor(past_latents).cpu().numpy()  # Convert tensor to numpy array
                             predicted_rewards = predicted_rewards.squeeze(0)  # Remove batch dimension
-                        predicted_reward = predicted_rewards[env.lookat_id][8]
+                        predicted_reward = predicted_rewards[env.lookat_id]
                         predicted_reward = predicted_reward * rewards_std + rewards_mean
                 obs[:, 6:8] = 1.5*yaw
                     
@@ -261,8 +286,17 @@ def play(args):
         # Display rewards and predicted rewards using OpenCV
         frame = np.zeros((200, 800, 3), dtype=np.uint8)
         rewards_np = rews[env.lookat_id].cpu().numpy()  # Convert tensor to numpy array
-        cv2.putText(frame, f"Rewards: {np.round(rewards_np, 2)}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        cv2.putText(frame, f"Predicted Rewards: {np.round(predicted_reward, 2)}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"Rewards: {rewards_np:.3f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"Predicted Rewards: {np.round(predicted_reward, 3)}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        
+        # Draw a circle based on the predicted reward
+        if predicted_reward < REWARD_THRESHOLD:
+            cv2.circle(frame, (400, 150), 50, (0, 0, 255), -1)  # Red circle
+        else:
+            cv2.circle(frame, (400, 150), 50, (0, 255, 0), -1)  # Green circle
+        
+        # Display predicted reward at the top of the window
+        cv2.putText(frame, f"Predicted Reward: {np.round(predicted_reward, 3)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         cv2.imshow('Rewards and Predicted Rewards', frame)
         cv2.waitKey(1)
 
@@ -307,7 +341,7 @@ def play(args):
 if __name__ == '__main__':
     EXPORT_POLICY = False
     RECORD_FRAMES = False
-    RECORD_REW = True
+    RECORD_REW = False
     MOVE_CAMERA = False
     args = get_args()
     try:
