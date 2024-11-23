@@ -34,6 +34,38 @@ import numpy as np
 from isaacgym.torch_utils import quat_apply, normalize
 from typing import Tuple
 
+def circle_ray_query(x0: torch.Tensor, y0: torch.Tensor, thetas: torch.Tensor, center_circle: torch.Tensor, radius: float, min_: float=0.1, max_:float = 3.0):
+    """
+    x0:(n,1), y0:(n,1), thetas: (n,t), center: (n,2)
+    for each env, compute the distances for the ray from (x0, y0) at thetas to cross the circle
+    return shape (n, t)
+    """
+    stheta = torch.sin(thetas) # (n,t)
+    ctheta = torch.cos(thetas) # (n,t)
+    xc = center_circle[:,0:1] # (n,1)
+    yc = center_circle[:,1:2] # (n,1)
+    d_c2line = torch.abs(stheta*xc - ctheta*yc - stheta*x0 + ctheta*y0)  #(n,t)
+    d_c0_square = torch.square(xc-x0) + torch.square(yc-y0)
+    d_0p = torch.sqrt(d_c0_square - torch.square(d_c2line))
+    semi_arc = torch.sqrt(radius**2 - torch.square(d_c2line))
+    raydist = torch.nan_to_num(d_0p - semi_arc, nan = max_).clip(min=min_, max=max_)
+    check_dir = ctheta * (xc-x0) + stheta * (yc-y0)
+    raydist = (check_dir > 0) * raydist + (check_dir<=0) * max_
+    return raydist
+
+def yaw_quat(quat: torch.Tensor) -> torch.Tensor:
+    quat_yaw = quat.clone().view(-1, 4)
+    qx = quat_yaw[:, 0]
+    qy = quat_yaw[:, 1]
+    qz = quat_yaw[:, 2]
+    qw = quat_yaw[:, 3]
+    yaw = torch.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+    quat_yaw[:, :2] = 0.0
+    quat_yaw[:, 2] = torch.sin(yaw / 2)
+    quat_yaw[:, 3] = torch.cos(yaw / 2)
+    quat_yaw = normalize(quat_yaw)
+    return quat_yaw
+
 # @ torch.jit.script
 def quat_apply_yaw(quat, vec):
     quat_yaw = quat.clone().view(-1, 4)
