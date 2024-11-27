@@ -57,6 +57,9 @@ class PPOLagrangian:
                  use_clipped_cost_value_loss=True,
                  schedule="fixed",
                  desired_kl=0.01,
+                 dagger_update_freq=20,
+                 priv_reg_coef_schedual=None,
+                 priv_reg_coef_schedual_resume=None,
                  device='cpu',
                  ):
 
