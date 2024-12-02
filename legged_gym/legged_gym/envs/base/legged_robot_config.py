@@ -33,6 +33,7 @@ from torch.nn.modules.activation import ReLU
 from torch.nn.modules.pooling import MaxPool2d
 from .base_config import BaseConfig
 import torch.nn as nn
+import numpy as np
 class LeggedRobotCfg(BaseConfig):
     class play:
         load_student_config = False
@@ -87,7 +88,7 @@ class LeggedRobotCfg(BaseConfig):
         num_future_goal_obs = 2
 
     class depth:
-        use_camera = False
+        use_camera = True
         camera_num_envs = 192
         camera_terrain_num_rows = 10
         camera_terrain_num_cols = 20
@@ -116,8 +117,11 @@ class LeggedRobotCfg(BaseConfig):
             dof_pos = 1.0
             dof_vel = 0.05
             height_measurements = 5.0
+            ray2d = 1.0
+            
         clip_observations = 100.
-        clip_actions = 1.2
+        # clip_actions = 1.2
+        clip_actions = 100.0
     class noise:
         add_noise = False
         noise_level = 1.0 # scales other values
@@ -268,7 +272,30 @@ class LeggedRobotCfg(BaseConfig):
         max_angular_velocity = 1000.
         max_linear_velocity = 1000.
         armature = 0.
-        thickness = 0.01
+        thickness = 0.01 
+        # for safe:
+        load_dynamic_object = True
+        object_num = 8
+        object_files = {
+        # '{LEGGED_GYM_ROOT_DIR}/resources/objects/DiningChair/model.urdf': 0.4,
+        # '{LEGGED_GYM_ROOT_DIR}/resources/objects/OfficeChair/model.urdf': 0.4,
+        # '{LEGGED_GYM_ROOT_DIR}/resources/objects/cylindar.urdf': 0.4,
+        }
+        
+    class sensors:
+        class ray2d:
+            enable = True
+            log2 = True
+            min_dist = 0.1
+            max_dist = 6.0
+            theta_start = - np.pi/4
+            theta_end = np.pi/4 + 0.0001
+            theta_step = np.pi/20
+            x_0 = -0.05
+            y_0 = 0.0
+            front_rear = False
+            illusion = True  # add illusion when there is noise
+            raycolor = (0,0.5,0.5)
 
     class domain_rand:
         randomize_friction = True
@@ -290,6 +317,7 @@ class LeggedRobotCfg(BaseConfig):
         action_curr_step_scratch = [0, 1]
         action_delay_view = 1
         action_buf_len = 8
+        randomize_timer_minus = 2.0
         
     class rewards:
         class scales:

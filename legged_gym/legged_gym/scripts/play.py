@@ -27,6 +27,15 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
+'''
+parkour policy:
+    obs:(num_envs,num_obs) (4,753)
+    action:(num_envs,joint) (4,12)
+
+avoid_policy:
+    obs: (num_envs,num_obs) (1,61)
+    action:(1,12)
+'''
 
 from legged_gym import LEGGED_GYM_ROOT_DIR
 import os
@@ -47,7 +56,7 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 from time import time, sleep
 from legged_gym.utils import webviewer
-sys.path.append("/home/xyli/Code/extreme-parkour/")
+sys.path.append("/Share/ziyanli/extreme-parkour")
 from predictor.train import MLPRewardPredictor  # Import the predictor model
 import numpy as np  # Add this import if not already present
 
@@ -94,10 +103,12 @@ def play(args):
         web_viewer = webviewer.WebViewer()
     faulthandler.enable()
     exptid = args.exptid
-    log_pth = "../../logs/{}/".format(args.proj_name) + args.exptid
+    safe_path = "/Share/ziyanli/extreme-parkour/legged_gym/logs/a1_pos_rough_lag/11_22_01-08-17_/"
+    # log_pth = "../../logs/{}/".format(args.proj_name) + args.exptid
+    log_pth = "/Share/ziyanli/extreme-parkour/legged_gym/logs/dis-10k-1113/"
 
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
-    _, train_cfg_safe = task_registry.get_cfgs(name=args.task_safe)
+    env_cfg_safe, train_cfg_safe = task_registry.get_cfgs(name=args.task_safe)
     # override some parameters for testing
     if args.nodelay:
         env_cfg.domain_rand.action_delay_view = 0
@@ -121,10 +132,10 @@ def play(args):
                                     "platform": 0.,
                                     "large stairs up": 0.,
                                     "large stairs down": 0.,
-                                    "parkour": 0.2,
-                                    "parkour_hurdle": 0.2,
+                                    "parkour": 0.,
+                                    "parkour_hurdle": 0.6,
                                     "parkour_flat": 0.,
-                                    "parkour_step": 0.2,
+                                    "parkour_step": 0.,
                                     "parkour_gap": 0.2, 
                                     "demo": 0.2}
     
@@ -192,11 +203,11 @@ def play(args):
     # Load the trained predictor model
     past_len = 20
     predictor = MLPRewardPredictor(latent_dim=32, past_steps=past_len)
-    predictor.load_state_dict(torch.load('/home/xyli/Code/extreme-parkour/predictor/ckpts/predictor_1121_20_0_100.pth'))
+    predictor.load_state_dict(torch.load('/Share/ziyanli/extreme-parkour/predictor/ckpts/predictor_1121_20_0_100.pth'))
     predictor.eval()
 
     # Load the statistics file
-    statistics = np.load('/home/xyli/Code/extreme-parkour/predictor/statistics.npy', allow_pickle=True).item()
+    statistics = np.load('/Share/ziyanli/extreme-parkour/predictor/statistics.npy', allow_pickle=True).item()
     rewards_mean = statistics['mean']
     rewards_std = statistics['std']
     
@@ -206,6 +217,11 @@ def play(args):
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     env.lookat_id = 2
     obs = env.get_observations()
+    safe_obs = env.get_safe_observations()
+    if torch.isnan(safe_obs).any():
+        print("nan in safe obs init")
+        code.interact(local=locals())
+    
     print("lookat", env.lookat_id)
     # env.terrain_levels[:] = 9
 
@@ -218,7 +234,7 @@ def play(args):
     
     # load safe policy
     train_cfg_safe.runner.resume = True
-    ppo_runner_safe, train_cfg_safe = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg_safe)
+    ppo_runner_safe, train_cfg_safe = task_registry.make_alg_runner(log_root=safe_path, env=env, name=args.task, args=args, train_cfg=train_cfg_safe)
     policy_safe = ppo_runner_safe.get_inference_policy(device=env.device)
 
     if RECORD_FRAMES:
@@ -293,10 +309,21 @@ def play(args):
             else:
                 actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
 
-            actions_safe = policy_safe(obs.detach())
+
+        # if torch.isnan(safe_obs).any():
+        #     print("nan in obs 111")
+        #     code.interact(local=locals())
+        # else:
+        #     print("111")
             
-        # obs, _, rews, dones, infos = env.step(actions.detach())
-        obs, _, rews, dones, infos = env.step(actions_safe.detach())
+        # obs,safe_obs, _, rews, dones, infos = env.step(actions.detach())
+        # if predicted_reward > REWARD_THRESHOLD:
+        #     obs,safe_obs, _, rews, dones, infos = env.step(actions.detach())
+        # else:
+        #     obs,safe_obs, _, rews, dones, infos = env.step(actions_safe.detach())
+        actions_safe = policy_safe(safe_obs.detach())
+        obs, _,  _, rews, dones, infos = env.step(actions_safe.detach())
+        print(" safe_action ", actions_safe)
 
         # # Display rewards and predicted rewards using OpenCV
         # frame = np.zeros((200, 800, 3), dtype=np.uint8)
@@ -349,7 +376,7 @@ def play(args):
         print("time:", env.episode_length_buf[env.lookat_id].item() / 50, 
               "cmd vx", env.commands[env.lookat_id, 0].item(),
               "actual vx", env.base_lin_vel[env.lookat_id, 0].item(), )
-        
+        exit()
         id = env.lookat_id
         
 
