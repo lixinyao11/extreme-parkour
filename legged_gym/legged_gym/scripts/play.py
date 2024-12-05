@@ -103,7 +103,8 @@ def play(args):
         web_viewer = webviewer.WebViewer()
     faulthandler.enable()
     exptid = args.exptid
-    safe_path = "/Share/ziyanli/extreme-parkour/legged_gym/logs/a1_pos_rough_lag/11_22_01-08-17_/"
+    # safe_path = "/Share/ziyanli/extreme-parkour/legged_gym/logs/a1_pos_rough_lag/11_22_01-08-17_/"
+    safe_path = "/Share/ziyanli/ABS/training/legged_gym/logs/a1_pos_rough_lag/12_02_23-32-57_/"
     # log_pth = "../../logs/{}/".format(args.proj_name) + args.exptid
     log_pth = "/Share/ziyanli/extreme-parkour/legged_gym/logs/dis-10k-1113/"
 
@@ -143,7 +144,7 @@ def play(args):
     env_cfg.terrain.curriculum = False
     env_cfg.terrain.max_difficulty = True
 
-    # env_cfg.terrain.selected = True
+    env_cfg.terrain.selected = True
 
     # env_cfg.terrain.selected_idx = 18
     # env_cfg.terrain.terrain_kwargs = {
@@ -175,17 +176,18 @@ def play(args):
     #     "pad_height": 0,
     #     "pit_depth": [0.2, 1]
     # }
-    # env_cfg.terrain.selected_idx = 16
-    # env_cfg.terrain.terrain_kwargs = {
-    #     "type": "parkour_hurdle_terrain",
-    #     "num_stones": env_cfg.terrain.num_goals - 2,
-    #     "stone_len": 0.4,
-    #     "hurdle_height_range": [0.3, 0.6],
-    #     "pad_height": 0,
-    #     "x_range": [1.2, 2.2],
-    #     "y_range": env_cfg.terrain.y_range,
-    #     "half_valid_width": [0.4, 0.8],
-    # }
+    env_cfg.terrain.selected_idx = 16
+    env_cfg.terrain.terrain_kwargs = {
+        "type": "parkour_hurdle_terrain",
+        "num_stones": env_cfg.terrain.num_goals - 2,
+        "stone_len": 0.4,
+        "hurdle_height_range": [0.3, 0.6],
+        "pad_height": 0,
+        # "x_range": [1.2, 2.2],
+        "x_range": [3.0, 5.2],
+        "y_range": env_cfg.terrain.y_range,
+        "half_valid_width": [0.4, 0.8],
+    }
     
     env_cfg.depth.angle = [0, 1]
     env_cfg.noise.add_noise = True
@@ -215,12 +217,10 @@ def play(args):
     # prepare environment
     env: LeggedRobot
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
-    env.lookat_id = 2
+    
+    # env.lookat_id = 2
     obs = env.get_observations()
     safe_obs = env.get_safe_observations()
-    if torch.isnan(safe_obs).any():
-        print("nan in safe obs init")
-        code.interact(local=locals())
     
     print("lookat", env.lookat_id)
     # env.terrain_levels[:] = 9
@@ -309,6 +309,7 @@ def play(args):
             else:
                 actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
 
+        
 
         # if torch.isnan(safe_obs).any():
         #     print("nan in obs 111")
@@ -317,30 +318,29 @@ def play(args):
         #     print("111")
             
         # obs,safe_obs, _, rews, dones, infos = env.step(actions.detach())
-        # if predicted_reward > REWARD_THRESHOLD:
-        #     obs,safe_obs, _, rews, dones, infos = env.step(actions.detach())
-        # else:
-        #     obs,safe_obs, _, rews, dones, infos = env.step(actions_safe.detach())
         actions_safe = policy_safe(safe_obs.detach())
-        obs, _,  _, rews, dones, infos = env.step(actions_safe.detach())
-        print(" safe_action ", actions_safe)
-
-        # # Display rewards and predicted rewards using OpenCV
-        # frame = np.zeros((200, 800, 3), dtype=np.uint8)
-        # rewards_np = rews[env.lookat_id].cpu().numpy()  # Convert tensor to numpy array
-        # cv2.putText(frame, f"Rewards: {rewards_np:.3f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        # cv2.putText(frame, f"Predicted Rewards: {np.round(predicted_reward, 3)}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        
-        # # Draw a circle based on the predicted reward
-        # if predicted_reward < REWARD_THRESHOLD:
-        #     cv2.circle(frame, (400, 150), 50, (0, 0, 255), -1)  # Red circle
+        # if predicted_reward > REWARD_THRESHOLD:
+        #     obs,safe_obs, _, rews, dones, infos = env.step(actions.detach(),is_safe=False)
         # else:
-        #     cv2.circle(frame, (400, 150), 50, (0, 255, 0), -1)  # Green circle
+        obs,safe_obs, _, rews, dones, infos = env.step(actions_safe.detach(),is_safe=True)
+        # obs, safe_obs,  _, rews, dones, infos = env.step(actions_safe.detach())
+
+        # Display rewards and predicted rewards using OpenCV
+        frame = np.zeros((200, 800, 3), dtype=np.uint8)
+        rewards_np = rews[env.lookat_id].cpu().numpy()  # Convert tensor to numpy array
+        cv2.putText(frame, f"Rewards: {rewards_np:.3f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"Predicted Rewards: {np.round(predicted_reward, 3)}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         
-        # # Display predicted reward at the top of the window
-        # cv2.putText(frame, f"Predicted Reward: {np.round(predicted_reward, 3)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        # cv2.imshow('Rewards and Predicted Rewards', frame)
-        # cv2.waitKey(1)
+        # Draw a circle based on the predicted reward
+        if predicted_reward < REWARD_THRESHOLD:
+            cv2.circle(frame, (400, 150), 50, (0, 0, 255), -1)  # Red circle
+        else:
+            cv2.circle(frame, (400, 150), 50, (0, 255, 0), -1)  # Green circle
+        
+        # Display predicted reward at the top of the window
+        cv2.putText(frame, f"Predicted Reward: {np.round(predicted_reward, 3)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.imshow('Rewards and Predicted Rewards', frame)
+        cv2.waitKey(1)
 
         if RECORD_REW:
             # Normalize depth values to the range 0-255
@@ -376,7 +376,7 @@ def play(args):
         print("time:", env.episode_length_buf[env.lookat_id].item() / 50, 
               "cmd vx", env.commands[env.lookat_id, 0].item(),
               "actual vx", env.base_lin_vel[env.lookat_id, 0].item(), )
-        exit()
+        # exit()
         id = env.lookat_id
         
 

@@ -79,8 +79,8 @@ class A1PosRoughCfg( LeggedRobotPosCfg ):
         decimation = 4
 
     class asset( LeggedRobotPosCfg.asset ):
-        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/go1/urdf/go1.urdf'
-        name = "go1"
+        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/a1/urdf/a1.urdf'
+        name = "a1"
         foot_name = "foot"
         penalize_contacts_on = ["thigh", "calf"] # collision reward
         terminate_after_contacts_on = ["base"] # termination rewrad
