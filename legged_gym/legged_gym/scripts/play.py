@@ -96,7 +96,6 @@ def create_recording_camera(gym, env_handle,
         )
     return camera_handle
 
-REWARD_THRESHOLD = 0.013  # Set the reward threshold
 
 def play(args):
     if args.web:
@@ -267,6 +266,8 @@ def play(args):
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
     predicted_reward = 0.
+    REWARD_THRESHOLD = 0.013  # Set the reward threshold
+    use_safe_action = False  # Initialize the flag for using safe action
 
     for i in range(10*int(env.max_episode_length)):
         if args.use_jit:
@@ -309,38 +310,29 @@ def play(args):
             else:
                 actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
 
-        
-
-        # if torch.isnan(safe_obs).any():
-        #     print("nan in obs 111")
-        #     code.interact(local=locals())
-        # else:
-        #     print("111")
-            
-        # obs,safe_obs, _, rews, dones, infos = env.step(actions.detach())
         actions_safe = policy_safe(safe_obs.detach())
-        # if predicted_reward > REWARD_THRESHOLD:
-        #     obs,safe_obs, _, rews, dones, infos = env.step(actions.detach(),is_safe=False)
-        # else:
-        obs,safe_obs, _, rews, dones, infos = env.step(actions_safe.detach(),is_safe=True)
-        # obs, safe_obs,  _, rews, dones, infos = env.step(actions_safe.detach())
+        
+        if use_safe_action:
+            obs, safe_obs, _, rews, dones, infos = env.step(actions_safe.detach(), is_safe=True)
+        else:
+            obs, safe_obs, _, rews, dones, infos = env.step(actions.detach(), is_safe=False)
 
         # Display rewards and predicted rewards using OpenCV
         frame = np.zeros((200, 800, 3), dtype=np.uint8)
         rewards_np = rews[env.lookat_id].cpu().numpy()  # Convert tensor to numpy array
         cv2.putText(frame, f"Rewards: {rewards_np:.3f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         cv2.putText(frame, f"Predicted Rewards: {np.round(predicted_reward, 3)}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        
-        # Draw a circle based on the predicted reward
         if predicted_reward < REWARD_THRESHOLD:
             cv2.circle(frame, (400, 150), 50, (0, 0, 255), -1)  # Red circle
         else:
             cv2.circle(frame, (400, 150), 50, (0, 255, 0), -1)  # Green circle
-        
         # Display predicted reward at the top of the window
         cv2.putText(frame, f"Predicted Reward: {np.round(predicted_reward, 3)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         cv2.imshow('Rewards and Predicted Rewards', frame)
-        cv2.waitKey(1)
+        # Check for key press to toggle safe action
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('p'):
+            use_safe_action = not use_safe_action
 
         if RECORD_REW:
             # Normalize depth values to the range 0-255
