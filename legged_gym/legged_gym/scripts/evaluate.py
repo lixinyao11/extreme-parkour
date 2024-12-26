@@ -63,6 +63,9 @@ def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
     # load_path = root + model
     return model, checkpoint
 
+HEIGHT_MIN = 0.3
+HEIGHT_MAX = 0.6
+
 def play(args):
     if args.web:
         web_viewer = webviewer.WebViewer()
@@ -104,7 +107,21 @@ def play(args):
     env_cfg.terrain.terrain_proportions = list(env_cfg.terrain.terrain_dict.values())
     env_cfg.terrain.curriculum = False
     env_cfg.terrain.max_difficulty = False
-    
+
+    env_cfg.terrain.selected = True
+    env_cfg.terrain.selected_idx = 16
+    env_cfg.terrain.terrain_kwargs = {
+        "type": "parkour_hurdle_terrain",
+        "num_stones": env_cfg.terrain.num_goals - 2,
+        "stone_len": 0.4,
+        "hurdle_height_range": [HEIGHT_MIN, HEIGHT_MAX],
+        "pad_height": 0,
+        # "x_range": [1.2, 2.2],
+        "x_range": [3.0, 5.2],
+        "y_range": env_cfg.terrain.y_range,
+        "half_valid_width": [0.4, 0.8],
+    }
+
     env_cfg.depth.angle = [0, 1]
     env_cfg.noise.add_noise = True
     env_cfg.domain_rand.randomize_friction = True
@@ -147,6 +164,8 @@ def play(args):
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
 
     dataset_depth_latent = []
+    dataset_depth_raw = []
+    dataset_ray = []
     dataset_obs = []
     dataset_rew = []
     dataset_dones = []
@@ -154,6 +173,8 @@ def play(args):
     for i in tqdm(range(1500)):
 
         if env.cfg.depth.use_camera:
+            depth_image = env.depth_buffer[env.lookat_id, -1].cpu().numpy()
+            ray2d = env.ray2d_obs[env.lookat_id].cpu().numpy()
             if infos["depth"] is not None:
                 obs_student = obs[:, :env.cfg.env.n_proprio]
                 obs_student[:, 6:8] = 0
@@ -179,6 +200,8 @@ def play(args):
         dataset_obs.append(obs.detach().cpu().numpy())
         dataset_rew.append(rews.detach().cpu().numpy())
         dataset_dones.append(dones.detach().cpu().numpy())
+        dataset_depth_raw.append(depth_image)
+        dataset_ray.append(ray2d)
 
         if args.web:
             web_viewer.render(fetch_results=True,
@@ -228,11 +251,13 @@ def play(args):
     # print("Mean time to fall: {:.2f}$\pm${:.2f}".format(time_to_fall_mean, time_to_fall_std))
     print("Mean edge violation: {:.2f}$\pm${:.2f}".format(edge_violation_mean, edge_violation_std))
 
-    with h5py.File("../../logs/parkour_new/dis_eval_dataset_0.5_1.5.hdf5", "w") as f:
+    with h5py.File(f"../../logs/parkour_new/dis_eval_dataset_{HEIGHT_MIN}_{HEIGHT_MAX}.hdf5", "w") as f:
         f.create_dataset("depth_latent", data=dataset_depth_latent)
         f.create_dataset("obs", data=dataset_obs)
         f.create_dataset("rew", data=dataset_rew)
         f.create_dataset("dones", data=dataset_dones)
+        f.create_dataset("depth_raw", data=dataset_depth_raw)
+        f.create_dataset("ray", data=dataset_ray)
         print("Saved dataset", len(dataset_rew), dataset_rew[0].shape)
 
 
