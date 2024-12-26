@@ -59,6 +59,7 @@ from legged_gym.utils import webviewer
 sys.path.append("/Share/ziyanli/extreme-parkour")
 from predictor.train import MLPRewardPredictor  # Import the predictor model
 import numpy as np  # Add this import if not already present
+import multiprocessing as mp
 
 def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
     if checkpoint==-1:
@@ -97,7 +98,7 @@ def create_recording_camera(gym, env_handle,
     return camera_handle
 
 
-def play(args):
+def play(args, flag):
     if args.web:
         web_viewer = webviewer.WebViewer()
     faulthandler.enable()
@@ -267,7 +268,6 @@ def play(args):
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
     predicted_reward = 0.
     REWARD_THRESHOLD = 0.013  # Set the reward threshold
-    use_safe_action = False  # Initialize the flag for using safe action
 
     for i in range(10*int(env.max_episode_length)):
         if args.use_jit:
@@ -312,7 +312,7 @@ def play(args):
 
         actions_safe = policy_safe(safe_obs.detach())
         
-        if use_safe_action:
+        if flag.value:
             obs, safe_obs, _, rews, dones, infos = env.step(actions_safe.detach(), is_safe=True)
         else:
             obs, safe_obs, _, rews, dones, infos = env.step(actions.detach(), is_safe=False)
@@ -322,17 +322,14 @@ def play(args):
         rewards_np = rews[env.lookat_id].cpu().numpy()  # Convert tensor to numpy array
         cv2.putText(frame, f"Rewards: {rewards_np:.3f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         cv2.putText(frame, f"Predicted Rewards: {np.round(predicted_reward, 3)}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        if predicted_reward < REWARD_THRESHOLD:
+        if flag.value:
             cv2.circle(frame, (400, 150), 50, (0, 0, 255), -1)  # Red circle
         else:
             cv2.circle(frame, (400, 150), 50, (0, 255, 0), -1)  # Green circle
         # Display predicted reward at the top of the window
         cv2.putText(frame, f"Predicted Reward: {np.round(predicted_reward, 3)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         cv2.imshow('Rewards and Predicted Rewards', frame)
-        # Check for key press to toggle safe action
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('p'):
-            use_safe_action = not use_safe_action
+        cv2.waitKey(1)
 
         if RECORD_REW:
             # Normalize depth values to the range 0-255
@@ -370,6 +367,15 @@ def play(args):
               "actual vx", env.base_lin_vel[env.lookat_id, 0].item(), )
         # exit()
         id = env.lookat_id
+
+
+def listen_for_keypress(flag):
+    """Process to listen for keypress and toggle the safe action flag."""
+    while True:
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('p'):
+            flag.value = not flag.value
+        sleep(0.01)  # Avoid CPU overuse
         
 
 if __name__ == '__main__':
@@ -378,10 +384,15 @@ if __name__ == '__main__':
     RECORD_REW = False
     MOVE_CAMERA = False
     args = get_args()
+    use_safe_action_flag = mp.Value('b', False)  # Shared flag for safe action
     try:
-        play(args)
+        play(args, use_safe_action_flag)
+        process = mp.Process(target=listen_for_keypress, args=(use_safe_action_flag,))
+        process.start()
+        process.join()
     except KeyboardInterrupt:
         print("KeyboardInterrupt")
+        process.terminate()
     finally:
         if RECORD_FRAMES:
             import subprocess
