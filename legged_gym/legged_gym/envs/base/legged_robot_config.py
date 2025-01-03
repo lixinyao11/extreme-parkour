@@ -145,6 +145,7 @@ class LeggedRobotCfg(BaseConfig):
         
         edge_width_thresh = 0.05
         horizontal_scale = 0.05 # [m] influence computation time by a lot
+        # horizontal_scale = 0.1 # [m] influence computation time by a lot
         horizontal_scale_camera = 0.1
         vertical_scale = 0.005 # [m]
         border_size = 5 # [m]
@@ -199,6 +200,7 @@ class LeggedRobotCfg(BaseConfig):
         
         # trimesh only:
         slope_treshold = 1.5# slopes above this threshold will be corrected to vertical surfaces
+        # slope_treshold = 0.75# slopes above this threshold will be corrected to vertical surfaces
         origin_zero_z = True
 
         num_goals = 8
@@ -319,6 +321,34 @@ class LeggedRobotCfg(BaseConfig):
         action_buf_len = 8
         randomize_timer_minus = 2.0
         
+    # class domain_rand:
+        # randomize_friction = True
+        # friction_range = [-0.2, 1.25]
+        # randomize_base_mass = True
+        # added_mass_range = [-1.5, 1.5]
+        # randomize_dof_bias = True
+        # max_dof_bias = 0.08
+        # randomize_timer_minus = 2.0  # timer_left is initialized with randomization: U(T-this, T)
+
+        # push_robots = True
+        # push_interval_s = 2.5
+        
+        randomize_yaw = True
+        init_yaw_range = [-3.14, 3.14]
+        randomize_roll = False
+        randomize_pitch = False
+        randomize_xy = True
+        init_x_range = [-0.5, 0.5]
+        init_y_range = [-0.5, 0.5]
+        randomize_velo = True
+        init_vlinx_range = [-0.5,0.5]
+        init_vliny_range = [-0.5,0.5]
+        init_vlinz_range = [-0.5,0.5]
+        init_vang_range = [-0.5,0.5]
+        randomize_init_dof = True
+        init_dof_factor=[0.5, 1.5]
+        stand_bias3 = [0.0, 0.0, 0.0]
+
     class rewards:
         class scales:
             # tracking rewards

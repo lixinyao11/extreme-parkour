@@ -76,8 +76,8 @@ def play(args):
     # override some parameters for testing
     if args.nodelay:
         env_cfg.domain_rand.action_delay_view = 0
-    # env_cfg.env.num_envs = 256
-    env_cfg.env.num_envs = 256 * 4
+    # env_cfg.env.num_envs = 5
+    env_cfg.env.num_envs = 256
     env_cfg.env.episode_length_s = 20
     env_cfg.commands.resampling_time = 60
     env_cfg.terrain.num_rows = 10
@@ -130,7 +130,6 @@ def play(args):
     env_cfg.domain_rand.randomize_base_mass = False
     env_cfg.domain_rand.randomize_base_com = False
 
-    depth_latent_buffer = []
     # prepare environment
     env: LeggedRobot
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
@@ -147,25 +146,25 @@ def play(args):
     if env.cfg.depth.use_camera:
         depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
     
-    total_steps = 1000
-    rewbuffer = deque(maxlen=total_steps)
-    lenbuffer = deque(maxlen=total_steps)
-    num_waypoints_buffer = deque(maxlen=total_steps)
-    time_to_fall_buffer = deque(maxlen=total_steps)
-    edge_violation_buffer = deque(maxlen=total_steps)
+    # total_steps = 1000
+    # rewbuffer = deque(maxlen=total_steps)
+    # lenbuffer = deque(maxlen=total_steps)
+    # num_waypoints_buffer = deque(maxlen=total_steps)
+    # time_to_fall_buffer = deque(maxlen=total_steps)
+    # edge_violation_buffer = deque(maxlen=total_steps)
 
-    cur_reward_sum = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
-    cur_episode_length = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
-    cur_edge_violation = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
-    cur_time_from_start = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
+    # cur_reward_sum = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
+    # cur_episode_length = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
+    # cur_edge_violation = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
+    # cur_time_from_start = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
 
     actions = torch.zeros(env.num_envs, 12, device=env.device, requires_grad=False)
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
 
     dataset_depth_latent = []
-    dataset_depth_raw = []
-    dataset_ray = []
+    # dataset_depth_raw = []
+    # dataset_ray = []
     dataset_obs = []
     dataset_rew = []
     dataset_dones = []
@@ -173,8 +172,8 @@ def play(args):
     for i in tqdm(range(1500)):
 
         if env.cfg.depth.use_camera:
-            depth_image = env.depth_buffer[env.lookat_id, -1].cpu().numpy()
-            ray2d = env.ray2d_obs[env.lookat_id].cpu().numpy()
+            # depth_image = env.depth_buffer[env.lookat_id, -1].detach().cpu().numpy()
+            # ray2d = env.ray2d_obs[env.lookat_id].detach().cpu().numpy()
             if infos["depth"] is not None:
                 obs_student = obs[:, :env.cfg.env.n_proprio]
                 obs_student[:, 6:8] = 0
@@ -194,71 +193,87 @@ def play(args):
             actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
             
         cur_goal_idx = env.cur_goal_idx.clone()
-        obs, _, rews, dones, infos = env.step(actions.detach())
+        obs, _, _, rews, dones, infos = env.step(actions.detach())
 
         dataset_depth_latent.append(depth_latent.detach().cpu().numpy())
         dataset_obs.append(obs.detach().cpu().numpy())
         dataset_rew.append(rews.detach().cpu().numpy())
         dataset_dones.append(dones.detach().cpu().numpy())
-        dataset_depth_raw.append(depth_image)
-        dataset_ray.append(ray2d)
+        # dataset_depth_raw.append(depth_image)
+        # dataset_ray.append(ray2d)
 
-        if args.web:
-            web_viewer.render(fetch_results=True,
-                        step_graphics=True,
-                        render_all_camera_sensors=True,
-                        wait_for_page_load=True)
+        if i % 10 == 9:
+            with h5py.File(f"../../logs/parkour_new/dis_eval_dataset_{HEIGHT_MIN}_{HEIGHT_MAX}_step{i}.hdf5", "w") as f:
+                f.create_dataset("depth_latent", data=dataset_depth_latent)
+                f.create_dataset("obs", data=dataset_obs)
+                f.create_dataset("rew", data=dataset_rew)
+                f.create_dataset("dones", data=dataset_dones)
+                # f.create_dataset("depth_raw", data=dataset_depth_raw)
+                # f.create_dataset("ray", data=dataset_ray)
+                print("Saved dataset", len(dataset_rew), dataset_rew[0].shape)
+            dataset_depth_latent = []
+            # dataset_depth_raw = []
+            # dataset_ray = []
+            dataset_obs = []
+            dataset_rew = []
+            dataset_dones = []
+
+        # if args.web:
+        #     web_viewer.render(fetch_results=True,
+        #                 step_graphics=True,
+        #                 render_all_camera_sensors=True,
+        #                 wait_for_page_load=True)
         
-        id = env.lookat_id
-        # Log stuff
-        edge_violation_buffer.extend(env.feet_at_edge.sum(dim=1).float().cpu().numpy().tolist())
-        # cur_edge_violation += env.feet_at_edge.sum(dim=1).float()
-        cur_reward_sum += rews
-        cur_episode_length += 1
-        cur_time_from_start += 1
+        # id = env.lookat_id
+        # # Log stuff
+        # edge_violation_buffer.extend(env.feet_at_edge.sum(dim=1).float().cpu().numpy().tolist())
+        # # cur_edge_violation += env.feet_at_edge.sum(dim=1).float()
+        # cur_reward_sum += rews
+        # cur_episode_length += 1
+        # cur_time_from_start += 1
 
-        new_ids = (dones > 0).nonzero(as_tuple=False)
-        killed_ids = ((dones > 0) & (~infos["time_outs"])).nonzero(as_tuple=False)
-        rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-        lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
-        num_waypoints_buffer.extend(cur_goal_idx[new_ids][:, 0].cpu().numpy().tolist())
-        time_to_fall_buffer.extend(cur_time_from_start[killed_ids][:, 0].cpu().numpy().tolist())
+        # new_ids = (dones > 0).nonzero(as_tuple=False)
+        # killed_ids = ((dones > 0) & (~infos["time_outs"])).nonzero(as_tuple=False)
+        # rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+        # lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+        # num_waypoints_buffer.extend(cur_goal_idx[new_ids][:, 0].cpu().numpy().tolist())
+        # time_to_fall_buffer.extend(cur_time_from_start[killed_ids][:, 0].cpu().numpy().tolist())
 
-        cur_reward_sum[new_ids] = 0
-        cur_episode_length[new_ids] = 0
-        cur_edge_violation[new_ids] = 0
-        cur_time_from_start[killed_ids] = 0
+        # cur_reward_sum[new_ids] = 0
+        # cur_episode_length[new_ids] = 0
+        # cur_edge_violation[new_ids] = 0
+        # cur_time_from_start[killed_ids] = 0
     
-    #compute buffer mean and std
-    rew_mean = statistics.mean(rewbuffer)
-    rew_std = statistics.stdev(rewbuffer)
+    # #compute buffer mean and std
+    # rew_mean = statistics.mean(rewbuffer)
+    # rew_std = statistics.stdev(rewbuffer)
 
-    len_mean = statistics.mean(lenbuffer)
-    len_std = statistics.stdev(lenbuffer)
+    # len_mean = statistics.mean(lenbuffer)
+    # len_std = statistics.stdev(lenbuffer)
 
-    num_waypoints_mean = np.mean(np.array(num_waypoints_buffer).astype(float)/7.0)
-    num_waypoints_std = np.std(np.array(num_waypoints_buffer).astype(float)/7.0)
+    # num_waypoints_mean = np.mean(np.array(num_waypoints_buffer).astype(float)/7.0)
+    # num_waypoints_std = np.std(np.array(num_waypoints_buffer).astype(float)/7.0)
 
-    # time_to_fall_mean = statistics.mean(time_to_fall_buffer)
-    # time_to_fall_std = statistics.stdev(time_to_fall_buffer)
+    # # time_to_fall_mean = statistics.mean(time_to_fall_buffer)
+    # # time_to_fall_std = statistics.stdev(time_to_fall_buffer)
 
-    edge_violation_mean = np.mean(edge_violation_buffer)
-    edge_violation_std = np.std(edge_violation_buffer)
+    # edge_violation_mean = np.mean(edge_violation_buffer)
+    # edge_violation_std = np.std(edge_violation_buffer)
 
-    print("Mean reward: {:.2f}$\pm${:.2f}".format(rew_mean, rew_std))
-    print("Mean episode length: {:.2f}$\pm${:.2f}".format(len_mean, len_std))
-    print("Mean number of waypoints: {:.2f}$\pm${:.2f}".format(num_waypoints_mean, num_waypoints_std))
-    # print("Mean time to fall: {:.2f}$\pm${:.2f}".format(time_to_fall_mean, time_to_fall_std))
-    print("Mean edge violation: {:.2f}$\pm${:.2f}".format(edge_violation_mean, edge_violation_std))
+    # print("Mean reward: {:.2f}$\pm${:.2f}".format(rew_mean, rew_std))
+    # print("Mean episode length: {:.2f}$\pm${:.2f}".format(len_mean, len_std))
+    # print("Mean number of waypoints: {:.2f}$\pm${:.2f}".format(num_waypoints_mean, num_waypoints_std))
+    # # print("Mean time to fall: {:.2f}$\pm${:.2f}".format(time_to_fall_mean, time_to_fall_std))
+    # print("Mean edge violation: {:.2f}$\pm${:.2f}".format(edge_violation_mean, edge_violation_std))
 
-    with h5py.File(f"../../logs/parkour_new/dis_eval_dataset_{HEIGHT_MIN}_{HEIGHT_MAX}.hdf5", "w") as f:
-        f.create_dataset("depth_latent", data=dataset_depth_latent)
-        f.create_dataset("obs", data=dataset_obs)
-        f.create_dataset("rew", data=dataset_rew)
-        f.create_dataset("dones", data=dataset_dones)
-        f.create_dataset("depth_raw", data=dataset_depth_raw)
-        f.create_dataset("ray", data=dataset_ray)
-        print("Saved dataset", len(dataset_rew), dataset_rew[0].shape)
+    # with h5py.File(f"../../logs/parkour_new/dis_eval_dataset_{HEIGHT_MIN}_{HEIGHT_MAX}.hdf5", "w") as f:
+    #     f.create_dataset("depth_latent", data=dataset_depth_latent)
+    #     f.create_dataset("obs", data=dataset_obs)
+    #     f.create_dataset("rew", data=dataset_rew)
+    #     f.create_dataset("dones", data=dataset_dones)
+    #     f.create_dataset("depth_raw", data=dataset_depth_raw)
+    #     f.create_dataset("ray", data=dataset_ray)
+    #     print("Saved dataset", len(dataset_rew), dataset_rew[0].shape)
 
 
 if __name__ == '__main__':

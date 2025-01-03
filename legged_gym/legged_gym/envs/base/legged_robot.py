@@ -103,7 +103,7 @@ class LeggedRobot(BaseTask):
 
         self.depth2ray_model = depth2ray_model
 
-        self.avoid_idx = 2
+        self.avoid_idx = 0
 
         self._parse_cfg(self.cfg)
         super().__init__(self.cfg, sim_params, physics_engine, sim_device, headless)
@@ -131,36 +131,40 @@ class LeggedRobot(BaseTask):
         if not is_safe:
             actions = self.reindex(actions)
 
-        # print("before ",actions)
         actions.to(self.device)
         if is_safe:
             clip_actions = self.cfg.normalization.clip_actions
         else:
             clip_actions = self.cfg.normalization.clip_actions / self.cfg.control.action_scale
-                
-        self.action_history_buf = torch.cat([self.action_history_buf[:, 1:].clone(), actions[:, None, :].clone()], dim=1)
-        if self.cfg.domain_rand.action_delay:
-            if self.global_counter % self.cfg.domain_rand.delay_update_global_steps == 0:
-                if len(self.cfg.domain_rand.action_curr_step) != 0:
-                    self.delay = torch.tensor(self.cfg.domain_rand.action_curr_step.pop(0), device=self.device, dtype=torch.float)
-            if self.viewer:
-                self.delay = torch.tensor(self.cfg.domain_rand.action_delay_view, device=self.device, dtype=torch.float)
-            indices = -self.delay -1
-            actions = self.action_history_buf[:, indices.long()] # delay for 1/50=20ms
-        # print("after ",actions)
+
+        if not is_safe:
+            self.action_history_buf = torch.cat([self.action_history_buf[:, 1:].clone(), actions[:, None, :].clone()], dim=1)
+        # if self.cfg.domain_rand.action_delay:
+        #     if self.global_counter % self.cfg.domain_rand.delay_update_global_steps == 0:
+        #         if len(self.cfg.domain_rand.action_curr_step) != 0:
+        #             self.delay = torch.tensor(self.cfg.domain_rand.action_curr_step.pop(0), device=self.device, dtype=torch.float)
+        #     if self.viewer:
+        #         self.delay = torch.tensor(self.cfg.domain_rand.action_delay_view, device=self.device, dtype=torch.float)
+        #     indices = -self.delay -1
+        #     actions = self.action_history_buf[:, indices.long()] # delay for 1/50=20ms
         self.global_counter += 1
         self.total_env_steps_counter += 1
             
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
-        self.render()
+        # self.render()
 
         for _ in range(self.cfg.control.decimation):
-            self.torques = self._compute_torques(self.actions).view(self.torques.shape)
+            if is_safe:
+                scaled_action = self.actions * 0.25
+            else: 
+                scaled_action = self.actions * self.cfg.control.action_scale
+            self.torques = self._compute_torques(scaled_action).view(self.torques.shape)
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
             self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
         self.post_physics_step()
+        self.render()
 
         clip_obs = self.cfg.normalization.clip_observations
         self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
@@ -231,12 +235,19 @@ class LeggedRobot(BaseTask):
         self.gym.end_access_image_tensors(self.sim)
 
     def _update_goals(self):
+        self.previous_goal_idx = self.cur_goal_idx.clone().detach()
         next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
         self.cur_goal_idx[next_flag] += 1
         self.reach_goal_timer[next_flag] = 0
+        # 判断 cur_goal_idx 是否发生变化
+        for i in range(len(self.cur_goal_idx)):
+            if self.cur_goal_idx[i] != self.previous_goal_idx[i]:
+                current_time = time() - self.initial_time
+                print(f"cur_goal_idx changed for environment {i} with used time {current_time} = {time()} - {self.initial_time}", file=open("goal_changes", "a"))
 
-        self.reached_goal_ids = torch.norm(self.root_states[:, :2] - self.cur_goals[:, :2], dim=1) < self.cfg.env.next_goal_threshold
+        self.reached_goal_ids = torch.norm(self.root_states[:, :2] - self.cur_goals[:, :2], dim=1) < 0.4
         self.reach_goal_timer[self.reached_goal_ids] += 1
+        print("i am here!!! "," root_states ",self.root_states," avoid_goals ",self.avoid_goals, " cur_goals ",self.cur_goals, " chazhi ", self.root_states[:,:2]-self.avoid_goals[:,:2], " norm ", torch.norm(self.root_states[:, :2] - self.avoid_goals[:, :2], dim=1), file=open("log.txt","a"))
 
         self.target_pos_rel = self.cur_goals[:, :2] - self.root_states[:, :2]
         self.next_target_pos_rel = self.next_goals[:, :2] - self.root_states[:, :2]
@@ -249,6 +260,62 @@ class LeggedRobot(BaseTask):
         target_vec_norm = self.next_target_pos_rel / (norm + 1e-5)
         self.next_target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
 
+    # def _update_goals(self):
+    #     next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
+    #     self.cur_goal_idx[next_flag] += 1
+    #     self.reach_goal_timer[next_flag] = 0
+
+    #     self.reached_goal_ids = torch.norm(self.root_states[:, :2] - self.avoid_goals[:, :2], dim=1) < 0.5
+    #     self.reach_goal_timer[self.reached_goal_ids] += 1
+    #     print("i am here!!! "," root_states ",self.root_states," avoid_goals ",self.avoid_goals, " chazhi ", self.root_states[:,:2]-self.avoid_goals[:,:2], " norm ", torch.norm(self.root_states[:, :2] - self.avoid_goals[:, :2], dim=1), file=open("log.txt","a"))
+
+    #     self.target_pos_rel = self.avoid_goals[:, :2] - self.root_states[:, :2]
+    #     self.next_target_pos_rel = self.next_goals[:, :2] - self.root_states[:, :2]
+
+    #     norm = torch.norm(self.target_pos_rel, dim=-1, keepdim=True)
+    #     target_vec_norm = self.target_pos_rel / (norm + 1e-5)
+    #     self.target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
+
+    #     norm = torch.norm(self.next_target_pos_rel, dim=-1, keepdim=True)
+    #     target_vec_norm = self.next_target_pos_rel / (norm + 1e-5)
+    #     self.next_target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
+        
+    # def _update_goals(self):
+    #     next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
+    #     self.previous_goal_idx = self.cur_goal_idx.clone().detach()
+    #     print("next_flag", next_flag, file=open("flags", "a"))
+    #     # self.previous_goal_idx = self.cur_goal_idx.copy()
+        
+    #     self.cur_goal_idx[next_flag] += 1
+    #     self.reach_goal_timer[next_flag] = 0
+        
+    #     print("reach_goal_timer", self.reach_goal_timer, file=open("flags", "a"))
+    #     print("cur_goal_idx", self.cur_goal_idx,"target ",self.position_targets, file=open("flags", "a"))
+    #     # 判断 cur_goal_idx 是否发生变化
+    #     for i in range(len(self.cur_goal_idx)):
+    #         if self.cur_goal_idx[i] != self.previous_goal_idx[i]:
+    #             current_time = time() - self.initial_time
+    #             print(f"cur_goal_idx changed for environment {i} with used time {current_time} = {time()} - {self.initial_time}", file=open("goal_changes", "a"))
+
+    #     # self.cfg.env.next_goal_threshold = 0.2，（HACK）ziyan: change it into 0.25 
+    #     self.reached_goal_ids = torch.norm(self.root_states[:, :2] - self.avoid_goals[:, :2], dim=1) < 0.25
+    #     print("i am here!!! "," root_states ",self.root_states," cur_goals ",self.cur_goals, " chazhi ", self.root_states[:,:2]-self.avoid_goals[:,:2], " norm ", torch.norm(self.root_states[:, :2] - self.avoid_goals[:, :2], dim=1), file=open("log.txt","a"))
+    #     self.reach_goal_timer[self.reached_goal_ids] += 1
+
+    #     self.target_pos_rel = self.avoid_goals[:, :2] - self.root_states[:, :2]
+    #     # print("cur_goals",self.cur_goals," root_states",self.root_states[:, :2],"avoid_idx",self.avoid_idx, " avoid_goals ",self.avoid_goals,file=open("1215flags", "a"))
+    #     # self.target_pos_rel = self.avoid_goals[:, :2] - self.root_states[:, :2]
+
+    #     self.next_target_pos_rel = self.next_goals[:, :2] - self.root_states[:, :2]
+
+    #     norm = torch.norm(self.target_pos_rel, dim=-1, keepdim=True)
+    #     target_vec_norm = self.target_pos_rel / (norm + 1e-5)
+    #     self.target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
+
+    #     norm = torch.norm(self.next_target_pos_rel, dim=-1, keepdim=True)
+    #     target_vec_norm = self.next_target_pos_rel / (norm + 1e-5)
+    #     self.next_target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
+
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
             calls self._post_physics_step_callback() for common computations 
@@ -260,9 +327,11 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_force_sensor_tensor(self.sim)
 
         self.episode_length_buf += 1
-        self.common_step_counter += 1
+        self.common_step_counter += 1   
 
         # prepare quantities
+        self.last_base_twist[:,:3] = self.base_lin_vel.clone()
+        self.last_base_twist[:,3:] = self.base_ang_vel.clone()
         self.base_quat[:] = self.root_states[:, 3:7]
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
@@ -289,8 +358,6 @@ class LeggedRobot(BaseTask):
         self.cur_goals = self._gather_cur_goals()
         self.next_goals = self._gather_cur_goals(future=1)
         self.avoid_goals = self._gather_cur_goals(future=self.avoid_idx)
-        print(self.avoid_goals,open(file="avoid goals.txt",mode="w"))
-
         self.update_depth_buffer()
 
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
@@ -374,7 +441,9 @@ class LeggedRobot(BaseTask):
         self.contact_buf[env_ids, :, :] = 0.
         self.action_history_buf[env_ids, :, :] = 0.
         self.cur_goal_idx[env_ids] = 0
+        self.previous_goal_idx[env_ids] = 0
         self.reach_goal_timer[env_ids] = 0
+        self.initial_time[env_ids] = time()
 
         # reset timer
         self.timer_left[env_ids] = -self.cfg.domain_rand.randomize_timer_minus * torch.rand(len(env_ids), device=self.device) + self.cfg.env.episode_length_s
@@ -612,6 +681,7 @@ class LeggedRobot(BaseTask):
         """
         # for safe
         self.timer_left -= self.dt
+        self.position_targets[:, :] = self.avoid_goals[:,:]  # avoid_goals previously
         
         pos_diff = self.position_targets - self.root_states[:, 0:3]
         self.safe_commands[:, :2] = quat_rotate_inverse(yaw_quat(self.base_quat[:]), pos_diff)[:, :2] # only x, y used here
@@ -619,6 +689,8 @@ class LeggedRobot(BaseTask):
         forward = quat_apply(self.base_quat, self.forward_vec)
         heading = torch.atan2(forward[:, 1], forward[:, 0])
         self.safe_commands[:, 2] = wrap_to_pi(self.heading_targets[:,0] - heading)
+        # print("safe command",self.safe_commands[:,0:3],file=open("safe_command","a"))
+        # print("pos_diff",pos_diff,file=open("safe_command","a"))
         
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0)
         self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
@@ -633,6 +705,7 @@ class LeggedRobot(BaseTask):
             if self.global_counter % self.cfg.depth.update_interval == 0:
                 self.measured_heights = self._get_heights()
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
+            # print("push robot",file=open("1215flags", "a"))
             self._push_robots()
         
     def _gather_cur_goals(self, future=0):
@@ -657,17 +730,12 @@ class LeggedRobot(BaseTask):
         
         # for safe policy
         tbd_envs = env_ids.clone()
-        # while len(tbd_envs) > 0:
+        # # while len(tbd_envs) > 0:
         _target_pos1 = torch_rand_float(1.5, 7.5, (len(tbd_envs), 1), device=self.device)
         _target_pos2 = torch_rand_float(-2.0, 2.0, (len(tbd_envs), 1), device=self.device)
-        _target_heading = torch_rand_float(0,0.05, (len(tbd_envs), 1), device=self.device)
-        # self.position_targets[tbd_envs, 0:1] = self.env_origins[tbd_envs, 0:1] + _target_pos1
-        # self.position_targets[tbd_envs, 1:2] = self.env_origins[tbd_envs, 1:2] + _target_pos2
-        # exit()
-        # self.position_targets[tbd_envs, 0:2] = self.next_goals[tbd_envs, 0:2]
-        # # self.position_targets[tbd_envs, 0:2] = torch.tensor([4.0, 2.0]).to(self.device)
-        # self.position_targets[tbd_envs, 2] = self.env_origins[tbd_envs,2] + 0.5
-        self.position_targets[tbd_envs, :] = self.avoid_goals[tbd_envs,:]
+        _target_heading = torch_rand_float(0, 0.05, (len(tbd_envs), 1), device=self.device)
+        self.position_targets[tbd_envs, :] = self.avoid_goals[tbd_envs,:]  # avoid_goals previously
+        print("resample commands ",self.position_targets,file=open("resample_commands.txt","a"))
         
         pos_diff = self.position_targets[tbd_envs] - self.root_states[tbd_envs, 0:3]
         self.heading_targets[tbd_envs, :] = wrap_to_pi(_target_heading + torch.atan2(pos_diff[:,1:2],pos_diff[:,0:1]))
@@ -691,7 +759,8 @@ class LeggedRobot(BaseTask):
             [torch.Tensor]: Torques sent to the simulation
         """
         #pd controller
-        actions_scaled = actions * self.cfg.control.action_scale
+        # actions_scaled = actions * self.cfg.control.action_scale
+        actions_scaled = actions
         control_type = self.cfg.control.control_type
         if control_type=="P":
             if not self.cfg.domain_rand.randomize_motor:  # TODO add strength to gain directly
@@ -847,6 +916,8 @@ class LeggedRobot(BaseTask):
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
 
         self.reach_goal_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        current_time_tmp = time()
+        self.initial_time = torch.full((self.num_envs,), current_time_tmp, dtype=torch.float, device=self.device, requires_grad=False)
 
         str_rng = self.cfg.domain_rand.motor_strength_range
         self.motor_strength = (str_rng[1] - str_rng[0]) * torch.rand(2, self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False) + str_rng[0]
@@ -876,6 +947,8 @@ class LeggedRobot(BaseTask):
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
         self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
+        self.last_base_twist = torch.zeros_like(self.root_states[:, 7:13])
+
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         if self.cfg.terrain.measure_heights:
             self.height_points = self._init_height_points()
@@ -1182,6 +1255,7 @@ class LeggedRobot(BaseTask):
             self.terrain_goals = torch.from_numpy(self.terrain.goals).to(self.device).to(torch.float)
             self.env_goals = torch.zeros(self.num_envs, self.cfg.terrain.num_goals + self.cfg.env.num_future_goal_obs, 3, device=self.device, requires_grad=False)
             self.cur_goal_idx = torch.zeros(self.num_envs, device=self.device, requires_grad=False, dtype=torch.long)
+            self.previous_goal_idx = torch.zeros(self.num_envs, device=self.device, requires_grad=False, dtype=torch.long)
             temp = self.terrain_goals[self.terrain_levels, self.terrain_types]
             last_col = temp[:, -1].unsqueeze(1)
             self.env_goals[:] = torch.cat((temp, last_col.repeat(1, self.cfg.env.num_future_goal_obs, 1)), dim=1)[:]

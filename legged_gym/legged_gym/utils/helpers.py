@@ -222,8 +222,6 @@ def get_args():
 
         {"name": "--web", "action": "store_true", "default": False, "help": "if use web viewer"},
         {"name": "--no_wandb", "action": "store_true", "default": False, "help": "no wandb"}
-
-
     ]
     # parse arguments
     args = parse_arguments(
@@ -235,6 +233,8 @@ def get_args():
     args.sim_device = args.sim_device_type
     if args.sim_device=='cuda':
         args.sim_device += f":{args.sim_device_id}"
+    # args.sim_device = "cuda:1"
+    
     return args
 
 def export_policy_as_jit(actor_critic, path, name):
@@ -305,7 +305,7 @@ def parse_arguments(description="Isaac Gym Example", headless=False, no_graphics
     if no_graphics:
         parser.add_argument('--nographics', action='store_true',
                             help='Disable graphics context creation, no viewer window is created, and no headless rendering is available')
-    parser.add_argument('--sim_device', type=str, default="cuda:0", help='Physics Device in PyTorch-like syntax')
+    parser.add_argument('--sim_device', type=str, default="cuda:1", help='Physics Device in PyTorch-like syntax')
     parser.add_argument('--pipeline', type=str, default="gpu", help='Tensor API pipeline (cpu/gpu)')
     parser.add_argument('--graphics_device_id', type=int, default=0, help='Graphics Device ID')
 

@@ -591,7 +591,9 @@ def parkour_hurdle_terrain(terrain,
 
     # half_valid_width = round(np.random.uniform(y_range[1]+0.2, y_range[1]+1) / terrain.horizontal_scale)
     half_valid_width = round(np.random.uniform(half_valid_width[0], half_valid_width[1]) / terrain.horizontal_scale)
-    hurdle_height_max = round(hurdle_height_range[1] / terrain.vertical_scale)
+    # hurdle_height_max = round(hurdle_height_range[1] / terrain.vertical_scale)
+    hurdle_height_max = round(hurdle_height_range[2] / terrain.vertical_scale)
+    hurdle_height_middle = round(hurdle_height_range[1] / terrain.vertical_scale)
     hurdle_height_min = round(hurdle_height_range[0] / terrain.vertical_scale)
 
     platform_len = round(platform_len / terrain.horizontal_scale)
@@ -606,21 +608,29 @@ def parkour_hurdle_terrain(terrain,
 
     dis_x = platform_len
     goals[0] = [platform_len - 1, mid_y]
+    print("goal", goals[0])
     last_dis_x = dis_x
     for i in range(num_stones):
         rand_x = np.random.randint(dis_x_min, dis_x_max)
         rand_y = np.random.randint(dis_y_min, dis_y_max)
         dis_x += rand_x
+        print("dis", dis_x)
         if not flat:
-            terrain.height_field_raw[dis_x-stone_len//2:dis_x+stone_len//2, ] = np.random.randint(hurdle_height_min, hurdle_height_max)
+            if i >= 2:
+                terrain.height_field_raw[dis_x-stone_len//2:dis_x+stone_len//2, ] = np.random.randint(hurdle_height_middle, hurdle_height_max)
+            else:
+                terrain.height_field_raw[dis_x-stone_len//2:dis_x+stone_len//2, ] = np.random.randint(hurdle_height_min, hurdle_height_middle)
             terrain.height_field_raw[dis_x-stone_len//2:dis_x+stone_len//2, :mid_y+rand_y-half_valid_width] = 0
             terrain.height_field_raw[dis_x-stone_len//2:dis_x+stone_len//2, mid_y+rand_y+half_valid_width:] = 0
+            print("obj", dis_x-stone_len//2, dis_x+stone_len//2)
         last_dis_x = dis_x
         goals[i+1] = [dis_x-rand_x//2, mid_y + rand_y]
+        print("goal", dis_x -rand_x//2)
     final_dis_x = dis_x + np.random.randint(dis_x_min, dis_x_max)
     # import ipdb; ipdb.set_trace()
-    if final_dis_x > terrain.width:
-        final_dis_x = terrain.width - 0.5 // terrain.horizontal_scale
+    # if final_dis_x > terrain.width:
+    #     print("width", terrain.width)
+    #     final_dis_x = terrain.width - 0.5 // terrain.horizontal_scale
     goals[-1] = [final_dis_x, mid_y]
     
     terrain.goals = goals * terrain.horizontal_scale

@@ -103,10 +103,20 @@ def play(args, flag):
         web_viewer = webviewer.WebViewer()
     faulthandler.enable()
     exptid = args.exptid
-    # safe_path = "/Share/ziyanli/extreme-parkour/legged_gym/logs/a1_pos_rough_lag/11_22_01-08-17_/"
+    
+    # safe_path = '/Share/ziyanli/ABS/training/legged_gym/logs/a1_pos_rough_lag/12_06_12-50-07_/'
+
+    # safe_path = "/Share/ziyanli/ABS/training/legged_gym/logs/a1_pos_rough_lag/12_15_22-22-04_"
     safe_path = "/Share/ziyanli/ABS/training/legged_gym/logs/a1_pos_rough_lag/12_02_23-32-57_/"
+    # safe_path = "/Share/ziyanli/ABS/training/legged_gym/logs/a1_pos_rough_lag/12_06_12-50-07_/"
+    
+    # safe_path = '/Share/ziyanli/ABS/training/legged_gym/logs/a1_pos_rough_lag/12_06_12-50-07_/'
+
+    # safe_path = "/Share/ziyanli/ABS/training/legged_gym/logs/a1_pos_rough_lag/12_15_22-22-04_"
+    # safe_path = "/Share/ziyanli/ABS/training/legged_gym/logs/a1_pos_rough_lag/12_02_23-32-57_/"
+    # safe_path = "/Share/ziyanli/ABS/training/legged_gym/logs/a1_pos_rough_lag/12_06_12-50-07_/"
     # log_pth = "../../logs/{}/".format(args.proj_name) + args.exptid
-    log_pth = "/Share/ziyanli/extreme-parkour/legged_gym/logs/dis-10k-1113/"
+    log_pth = "/Share/ziyanli/extreme-parkour/legged_gym/logs/parkour_new/dis-10k-1113/"
 
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     env_cfg_safe, train_cfg_safe = task_registry.get_cfgs(name=args.task_safe)
@@ -150,15 +160,15 @@ def play(args, flag):
     # env_cfg.terrain.terrain_kwargs = {
     #     "type": "parkour_step_terrain",
     #     "num_stones": env_cfg.terrain.num_goals - 2,
-    #     # "step_height": 0.45,
-    #     "step_height": 0.55,
+    #     "step_height": 0.35,
+    #     # "step_height": 0.55,
     #     "x_range": [0.3,1.5],
     #     "y_range": [-0.4, 0.4],
     #     "half_valid_width": [0.5, 1],
     #     "pad_height": 0,
     # }
     # env_cfg.terrain.selected_idx = 15
-    # difficulty = 0.5
+    # difficulty = 0.1
     # x_range = [-0.1, 0.1+0.3*difficulty]  # offset to stone_len
     # y_range = [0.2, 0.3+0.1*difficulty]
     # stone_len = [0.9 - 0.3*difficulty, 1 - 0.2*difficulty]#2 * round((0.6) / 2.0, 1)
@@ -181,10 +191,21 @@ def play(args, flag):
         "type": "parkour_hurdle_terrain",
         "num_stones": env_cfg.terrain.num_goals - 2,
         "stone_len": 0.4,
-        "hurdle_height_range": [0.3, 0.6],
+        # "hurdle_height_range": [0.3, 0.6],
+        # "hurdle_height_range": [0.6, 1.0],
+        # "hurdle_height_range": [0.3, 0.6],
+        "hurdle_height_range": [0.2, 0.5, 1.0],
+        # "hurdle_height_range": [0.5, 0.6, 1.0],
         "pad_height": 0,
         # "x_range": [1.2, 2.2],
-        "x_range": [3.0, 5.2],
+        # "x_range": [3.6, 6.6],
+        # "x_range": [3.0, 5.2],
+        "x_range": [4.2, 6.6],
+        # "x_range": [6.0,7.0],
+
+        # "x_range": [4.2,5.0],
+        # "x_range": [6.0,7.0],
+
         "y_range": env_cfg.terrain.y_range,
         "half_valid_width": [0.4, 0.8],
     }
@@ -205,7 +226,8 @@ def play(args, flag):
     # Load the trained predictor model
     past_len = 20
     predictor = MLPRewardPredictor(latent_dim=32, past_steps=past_len)
-    predictor.load_state_dict(torch.load('/Share/ziyanli/extreme-parkour/predictor/ckpts/predictor_1121_20_0_100.pth'))
+    predictor.load_state_dict(torch.load('/Share/ziyanli/extreme-parkour/predictor/ckpts/predictor_1121_20_0_100.pth', map_location=torch.device('cuda:1')))
+    # predictor.load_state_dict(torch.load('/Share/ziyanli/extreme-parkour/predictor/ckpts/predictor_1121_20_0_100.pth'))
     predictor.eval()
 
     # Load the statistics file
@@ -267,7 +289,7 @@ def play(args, flag):
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
     predicted_reward = 0.
-    REWARD_THRESHOLD = 0.013  # Set the reward threshold
+    REWARD_THRESHOLD = 0.015  # Set the reward threshold
 
     for i in range(10*int(env.max_episode_length)):
         if args.use_jit:
@@ -313,6 +335,7 @@ def play(args, flag):
         actions_safe = policy_safe(safe_obs.detach())
         
         if flag.value:
+        # if predicted_reward <= REWARD_THRESHOLD:
             obs, safe_obs, _, rews, dones, infos = env.step(actions_safe.detach(), is_safe=True)
         else:
             obs, safe_obs, _, rews, dones, infos = env.step(actions.detach(), is_safe=False)
@@ -343,9 +366,9 @@ def play(args, flag):
             text_thickness = 1
             text_color = (0, 0, 255)  # Red color in BGR format
             text_position = (10, depth_image.shape[0] - 10)
-            cv2.putText(depth_image, text, text_position, cv2.FONT_HERSHEY_SIMPLEX, text_size, text_color, text_thickness, cv2.LINE_AA)
+            # cv2.putText(depth_image, text, text_position, cv2.FONT_HERSHEY_SIMPLEX, text_size, text_color, text_thickness, cv2.LINE_AA)
             
-            depth_filename = os.path.join(os.path.abspath("../../logs/images/"), f"depth_{i:04d}.png")
+            depth_filename = os.path.join(os.path.abspath("/Share/ziyanli/extreme-parkour/legged_gym/logs/images3/"), f"depth_{i:04d}.png")
             cv2.imwrite(depth_filename, depth_image)
 
         if RECORD_FRAMES:
@@ -371,6 +394,8 @@ def play(args, flag):
 
 def listen_for_keypress(flag):
     """Process to listen for keypress and toggle the safe action flag."""
+    img = np.zeros((200, 200, 3), dtype=np.uint8)
+    cv2.imshow("Switch window", img)
     while True:
         key = cv2.waitKey(1) & 0xFF
         if key == ord('p'):
@@ -381,16 +406,16 @@ def listen_for_keypress(flag):
 if __name__ == '__main__':
     EXPORT_POLICY = False
     RECORD_FRAMES = False
-    RECORD_REW = False
+    RECORD_REW = True
     MOVE_CAMERA = False
     args = get_args()
     use_safe_action_flag = mp.Value('b', False)  # Shared flag for safe action
     try:
-        play(args, use_safe_action_flag)
         process = mp.Process(target=listen_for_keypress, args=(use_safe_action_flag,))
         process.start()
-        process.join()
+        play(args, use_safe_action_flag)
     except KeyboardInterrupt:
+        process.join()
         print("KeyboardInterrupt")
         process.terminate()
     finally:
@@ -410,20 +435,20 @@ if __name__ == '__main__':
             for f in os.listdir(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images")):
                 os.remove(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images", f))
             print("done deleting frame images")
-        if RECORD_REW:
-            import subprocess
-            print("converting depth images to video")
-            log_dir = "../../logs/{}/".format(args.proj_name) + args.exptid
-            # Convert depth images to video
-            subprocess.run(["ffmpeg",
-                "-framerate", "50",
-                "-r", "50",
-                "-i", "../../logs/images/depth_%04d.png",
-                "-c:v", "libx264",
-                "-hide_banner", "-loglevel", "error",
-                os.path.join(log_dir, f"depth_video.mp4")
-            ])
-            print("done converting depth images to video, deleting depth images")
+        # if RECORD_REW:
+            # import subprocess
+            # print("converting depth images to video")
+            # log_dir = "/Share/ziyanli/extreme-parkour/legged_gym/logs/{}/".format(args.proj_name) + args.exptid
+            # # Convert depth images to video
+            # subprocess.run(["ffmpeg",
+            #     "-framerate", "50",
+            #     "-r", "50",
+            #     "-i", "../../logs/images/depth_%04d.png",
+            #     "-c:v", "libx264",
+            #     "-hide_banner", "-loglevel", "error",
+            #     os.path.join(log_dir, f"depth_video.mp4")
+            # ])
+            # print("done converting depth images to video, deleting depth images")
             # for f in os.listdir(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images")):
             #     if f.startswith("depth_"):
             #         os.remove(os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "images", f))

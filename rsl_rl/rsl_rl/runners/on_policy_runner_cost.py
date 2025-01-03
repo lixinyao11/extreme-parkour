@@ -59,10 +59,12 @@ class OnPolicyRunnerCost:
         else:
             num_critic_obs = self.env.num_obs
         actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCriticCost
-        actor_critic: ActorCriticCost = actor_critic_class( self.env.num_obs,
-                                                        num_critic_obs,
-                                                        self.env.num_actions,
-                                                        **self.policy_cfg).to(self.device)
+        # actor_critic: ActorCriticCost = actor_critic_class( self.env.num_obs,
+        #                                                 num_critic_obs,
+        #                                                 self.env.num_actions,
+        #                                                 **self.policy_cfg).to(self.device)
+        print("params: ",self.policy_cfg)
+        actor_critic: ActorCriticCost = actor_critic_class(61,61,12,**self.policy_cfg).to(self.device)
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO_Lagrangian
         # import pdb; pdb.set_trace()
         self.alg: PPO_LAGRANGIAN = alg_class(actor_critic, device=self.device, **self.alg_cfg)
