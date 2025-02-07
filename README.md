@@ -17,13 +17,13 @@ This paper addresses the challenges of extending parkour skills to practical nav
 
 ### Architecture
 
-![](method.png)
+![](https://github.com/komorebilzy/Navigation-with-parkour/blob/gh-pages/method.png)
 
 We leverage simulation-based rollouts to collect diverse data and train the policy selector, enabling the robot to make informed decisions based on depth information.
 
 ### Visualization of Our pipline
 
-![](result_1.png)
+![](https://github.com/komorebilzy/Navigation-with-parkour/blob/gh-pages/result_1.png)
 
 Visualization of our result.
 
